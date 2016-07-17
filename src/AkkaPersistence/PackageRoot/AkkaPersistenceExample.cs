@@ -7,25 +7,22 @@ using System.Threading.Tasks;
 using Microsoft.ServiceFabric.Data.Collections;
 using Microsoft.ServiceFabric.Services.Communication.Runtime;
 using Microsoft.ServiceFabric.Services.Runtime;
+using Akka.Persistence.ServiceFabric;
 using Akka.Configuration;
 using Akka.Actor;
-using AkkaPersistence.Actors;
-using Akka.Persistence.ServiceFabric;
-using Akka.Persistence.ServiceFabric.Snapshot;
-using Microsoft.ServiceFabric.Data;
 using PersistenceExample;
 
-namespace AkkaPersistence
+namespace AkkaPersistenceExample
 {
     /// <summary>
     /// An instance of this class is created for each service replica by the Service Fabric runtime.
     /// </summary>
-    internal sealed class AkkaPersistence : AkkaStatefulService
+    internal sealed class AkkaPersistenceExample : AkkaStatefulService
     {
-        public AkkaPersistence(StatefulServiceContext context)
+        public AkkaPersistenceExample(StatefulServiceContext context)
             : base(context)
         { }
-      
+
         /// <summary>
         /// Optional override to create listeners (e.g., HTTP, Service Remoting, WCF, etc.) for this service replica to handle client or user requests.
         /// </summary>
@@ -36,17 +33,15 @@ namespace AkkaPersistence
         //protected override IEnumerable<ServiceReplicaListener> CreateServiceReplicaListeners()
         //{
         //    return new ServiceReplicaListener[0];
-        //} 
+        //}
 
-    /// <summary>
-    /// This is the main entry point for your service replica.
-    /// This method executes when this replica of your service becomes primary and has write status.
-    /// </summary>
-    /// <param name="cancellationToken">Canceled when Service Fabric needs to shut down this service replica.</param>
-    protected override async Task RunAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// This is the main entry point for your service replica.
+        /// This method executes when this replica of your service becomes primary and has write status.
+        /// </summary>
+        /// <param name="cancellationToken">Canceled when Service Fabric needs to shut down this service replica.</param>
+        protected override async Task RunAsync(CancellationToken cancellationToken)
         {
-            // TODO: Replace the following sample code with your own logic 
-            //       or remove this RunAsync override if it's not needed in your service.
             var config = ConfigurationFactory.ParseString(@"
                 akka {
                     persistence {
@@ -72,76 +67,50 @@ namespace AkkaPersistence
                         }
                     }  
                 }");
-
-
+            
             var myDictionary = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>("myDictionary");
 
             // Create a new actor system (a container for your actors)
             var system = Akka.Actor.ActorSystem.Create("MySystem", config);
+                        
 
             //SqlServerPersistence.Init(system);
-
             //BasicUsage(system);
 
-            //FailingActorExample(system);
+            FailingActorExample(system);
 
-            //SnapshotedActor(system);
+           // SnapshotedActor(system);
 
             //ViewExample(system);
 
             //AtLeastOnceDelivery(system);
-
-            await IncrementCounter(system, cancellationToken);
-        }
-
-        private static async Task IncrementCounter(ActorSystem system, CancellationToken cancellationToken)
-        {
-            // Create your actor and get a reference to it.
-            // This will be an "ActorRef", which is not a
-            // reference to the actual actor instance
-            // but rather a client or proxy to it.
-            var logger = system.ActorOf<LoggerActor>("Startup");
-            //var logger2 = system.ActorOf<LoggerActor>("Startup2");
-            // Send a message to the actor
-            logger.Tell("First Message");
-            //logger2.Tell("First Message to Logger 2");
-            var counter = 0;
+            Console.ReadLine();
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                logger.Tell("Increment");
-
-                if (counter % 10 == 0)
+                using (var tx = this.StateManager.CreateTransaction())
                 {
-                    logger.Tell("Boom");
-                }
+                    var result = await myDictionary.TryGetValueAsync(tx, "Counter");
 
-                if (counter % 5 == 0)
-                {
-                    var result = await logger.Ask("Whats the counter now");
-                    var currentCount = result != null && int.Parse(result.ToString()) > 0 ? result.ToString() : "Value does not exist.";
-                    ServiceEventSource.Current.Message($"Current Counter Value: {currentCount}");
+                    ServiceEventSource.Current.ServiceMessage(this, "Current Counter Value: {0}",
+                        result.HasValue ? result.Value.ToString() : "Value does not exist.");
 
-                    var messages = (List<string>) await logger.Ask("Get Messages");
+                    await myDictionary.AddOrUpdateAsync(tx, "Counter", 0, (key, value) => ++value);
 
-                    if(messages != null)
-                    {
-                        foreach (var item in messages)
-                        {
-                            ServiceEventSource.Current.Message($"Message in saved state is: {item}");
-                        }
-                    }         
+                    // If an exception is thrown before calling CommitAsync, the transaction aborts, all changes are 
+                    // discarded, and nothing is saved to the secondary replicas.
+                    await tx.CommitAsync();
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-                ++counter;
             }
         }
+
         private static void AtLeastOnceDelivery(ActorSystem system)
         {
-             ServiceEventSource.Current.Message("\n--- AT LEAST ONCE DELIVERY EXAMPLE ---\n");
+            ServiceEventSource.Current.Message("\n--- AT LEAST ONCE DELIVERY EXAMPLE ---\n");
             var delivery = system.ActorOf(Props.Create(() => new DeliveryActor()), "delivery");
 
             var deliverer = system.ActorOf(Props.Create(() => new AtLeastOnceDeliveryExampleActor(delivery.Path)));
@@ -154,15 +123,15 @@ namespace AkkaPersistence
 
             deliverer.Tell(new Message("bar"));
 
-             ServiceEventSource.Current.Message("\nSYSTEM: Throwing exception in Deliverer\n");
+            ServiceEventSource.Current.Message("\nSYSTEM: Throwing exception in Deliverer\n");
             deliverer.Tell("boom");
             System.Threading.Thread.Sleep(1000);
 
             deliverer.Tell(new Message("bar1"));
-             ServiceEventSource.Current.Message("\nSYSTEM: Enabling confirmations in 3 seconds\n");
+            ServiceEventSource.Current.Message("\nSYSTEM: Enabling confirmations in 3 seconds\n");
 
             System.Threading.Thread.Sleep(3000);
-             ServiceEventSource.Current.Message("\nSYSTEM: Enabled confirmations\n");
+            ServiceEventSource.Current.Message("\nSYSTEM: Enabled confirmations\n");
             delivery.Tell("start");
 
         }
@@ -237,6 +206,7 @@ namespace AkkaPersistence
 
         private static void BasicUsage(ActorSystem system)
         {
+            ServiceEventSource.Current.Message("\n--- BASIC EXAMPLE ---\n");
             ServiceEventSource.Current.Message("--- BASIC EXAMPLE ---");
             // create a persistent actor, using LocalSnapshotStore and MemoryJournal
             var aref = system.ActorOf(Props.Create<ExamplePersistentActor>(), "basic-actor");

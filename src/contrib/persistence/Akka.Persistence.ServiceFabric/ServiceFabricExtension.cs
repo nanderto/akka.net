@@ -19,21 +19,13 @@ namespace Akka.Persistence.ServiceFabric
         public ServiceFabricJournalSettings JournalSettings { get; private set; }
 
         public StatefulServiceContext StatefulServiceContext { get; set; }
-        /// <summary>
-        /// The collection for the ServiceFabric journal
-        /// </summary>
-        //public IMongoCollection<JournalEntry> JournalCollection { get; private set; }
 
         /// <summary>
-        /// The settings for the MongoDB snapshot store.
+        /// The settings for the Service Fabric Snapshot Store.
         /// </summary>
         public ServiceFabricSnapshotSettings SnapshotStoreSettings { get; private set; }
-        public IReliableStateManager StateManager { get; internal set; }
 
-        /// <summary>
-        /// The collection for the ServiceFabric snapshot store
-        /// </summary>
-        //public IServiceFabricCollection<SnapshotEntry> SnapshotCollection { get; private set; }
+        public IReliableStateManager StateManager { get; internal set; }
 
         public ServiceFabricExtension(ExtendedActorSystem system)
         {
@@ -55,22 +47,5 @@ namespace Akka.Persistence.ServiceFabric
             StatefulServiceContext = AkkaStatefulService.ServiceContext;
             StateManager = AkkaStatefulService.StatefulService.StateManager;
         }
-
-        //public StatefulServiceContext GetReference(String fieldName)
-        //{
-        //    var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-        //    assemblies[0].GetModule("").
-        //    var r = AppDomain.CurrentDomain. .AssemblyResolve("System.Fabric.StatefulServiceContext");
-        //    Type t = typeof(StatefulServiceContext);
-        //    Assembly assemFromType = t.Assembly;
-        //    Assembly currentAssem = Assembly.GetExecutingAssembly();
-        //    var context = currentAssem.GetModule("Akka.Persistence.ServiceFabric");
-           
-        //    Type classType = this.GetType();
-        //    FieldInfo info = classType.GetField(fieldName);
-        //    // Use FieldInfo for fields, PropertyInfo for Properties (get/set accessor) and MethodInfo for methods
-        //    return (StatefulServiceContext)info.GetValue(this); // use "this" assuming this method will be in the same class that contains the fields you're attempting to access.
-        //}
-
     }
 }

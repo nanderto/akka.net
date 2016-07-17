@@ -16,10 +16,16 @@ namespace AkkaPersistence.Actors
 
         private int _msgsSinceLastSnapshot = 0;
 
+        private int counter;
+
         public LoggerActor()
         {
-           
-            Recover<string>(str => messages.Add(str));
+
+            Recover<string>(str =>
+            {
+                messages.Add(str);
+            });
+
             Recover<SnapshotOffer>(offer => {
                 var messages = offer.Snapshot as List<string>;
                 if (messages != null) // null check
@@ -28,7 +34,33 @@ namespace AkkaPersistence.Actors
 
             Command<string>(str => Persist(str, s => 
             {
-                messages.Add(str); //add msg to in-memory event store after persisting
+                if (str == "Boom")
+                {
+                    ServiceEventSource.Current.Message($"Throwing an exception in Logging actor {str}!!!");
+                    throw new Exception("Controlled Devestation");
+                }
+
+                if (str == "Whats the counter now")
+                {
+                    Sender.Tell(counter, Self);
+                }
+
+
+                if (str == "Get Messages")
+                {
+                    Sender.Tell(messages, Self);
+                }
+
+                if (str == "Increment")
+                {
+                    ++counter;
+                    messages.Add($"Counter has been {str}ed to {counter}");
+                }
+                else
+                {
+                    messages.Add(str); //add msg to in-memory event store after persisting
+                }
+                
                 if (++_msgsSinceLastSnapshot % 10 == 0)
                 {
                     //time to save a snapshot

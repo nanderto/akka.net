@@ -89,7 +89,13 @@
     <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Actors\AtLeastOnceDeliveryExampleActor.cs" />
+    <Compile Include="Actors\ExamplePersistentActor.cs" />
+    <Compile Include="Actors\ExamplePersistentFailingActor.cs" />
     <Compile Include="Actors\LoggerActor.cs" />
+    <Compile Include="Actors\SnapshotedExampleActor.cs" />
+    <Compile Include="Actors\ViewExampleActor.cs" />
+    <Compile Include="ExampleView.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PackageRoot\AkkaPersistence.cs" />
     <Compile Include="Program.cs" />

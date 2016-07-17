@@ -14,33 +14,14 @@ namespace Akka.Persistence.ServiceFabric.Snapshot
     {
         private readonly IReliableStateManager StateManager;
 
-        //private readonly IReliableDictionary<string, SnapshotEntry> Snapshots;
-
-        //private readonly IReliableDictionary<string, SnapshotStorageMetaData> SnapshotStorageMetaData;
-
-        //private readonly IReliableDictionary<string, long> SnapshotStorageCurrentHighSequenceNumber;
-
         public ServiceFabricSnapshotStore()
         {
-
             this.StateManager = ServiceFabricPersistence.Instance.Apply(Context.System).StateManager;
-
-            //var task = this.StateManager.GetOrAddAsync<IReliableDictionary<string, SnapshotEntry>>("Snapshots");
-            //task.Wait();
-            //Snapshots = task.Result;
-
-            //var taskSnapshotMetaData = this.StateManager.GetOrAddAsync<IReliableDictionary<string, SnapshotStorageMetaData>>("SnapshotStorageMetaData");
-            //taskSnapshotMetaData.Wait();
-            //SnapshotStorageMetaData = taskSnapshotMetaData.Result;
-
-            //var taskSnapshotStorageCurrentHighSequenceNumber = this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>("SnapshotStorageCurrentHighSequenceNumber");
-            //taskSnapshotStorageCurrentHighSequenceNumber.Wait();
-            //SnapshotStorageCurrentHighSequenceNumber = taskSnapshotStorageCurrentHighSequenceNumber.Result;
         }
 
         protected async override Task DeleteAsync(SnapshotMetadata metadata)
         {
-            ServiceEventSource.Current.Message($"Entering {nameof(DeleteAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr}");
+            ServiceEventSource.Current.Message($"Entering ServiceFabricSnapshotStore.{nameof(DeleteAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr}");
 
             using (var tx = this.StateManager.CreateTransaction())
             {
@@ -57,7 +38,7 @@ namespace Akka.Persistence.ServiceFabric.Snapshot
 
         protected async override Task DeleteAsync(string persistenceId, SnapshotSelectionCriteria criteria)
         {
-            ServiceEventSource.Current.Message($"Entering {nameof(DeleteAsync)} PersistenceId: {persistenceId} ");
+            ServiceEventSource.Current.Message($"Entering ServiceFabricSnapshotStore.{nameof(DeleteAsync)} PersistenceId: {persistenceId} ");
 
             if ((criteria.MaxSequenceNr > 0 && criteria.MaxSequenceNr < long.MaxValue) &&
                (criteria.MaxTimeStamp != DateTime.MinValue && criteria.MaxTimeStamp != DateTime.MaxValue))
@@ -68,19 +49,15 @@ namespace Akka.Persistence.ServiceFabric.Snapshot
                     long FirstSequenceNumber = 0;
                     for (long i = 0; i < criteria.MaxSequenceNr; i++)
                     {
-                        var result = await snapshots.TryGetValueAsync(tx, $"{i}");
+                        var result = await snapshots.TryGetValueAsync(tx, $"{persistenceId}_{i}");
                         var snapShot = result.HasValue ? result.Value : null;
                         if (snapShot.Timestamp > criteria.MaxTimeStamp.Ticks)
                         {
                             FirstSequenceNumber = i;
-                            await snapshots.TryRemoveAsync(tx, $"{i}");
+                            await snapshots.TryRemoveAsync(tx, $"{persistenceId}_{i}");
                         }
                     }
 
-                    //var snapshotStorageMetaData = new SnapshotStorageMetaData();
-                    //snapshotStorageMetaData.FirstSequenceNumber = FirstSequenceNumber;
-                    //var snapshotMetaData = await SnapshotStorageMetaData.AddOrUpdateAsync(tx, persistenceId, snapshotStorageMetaData,(s, sssmd) => snapshotStorageMetaData);
-                    
                     await tx.CommitAsync();
                 }
             }
@@ -91,7 +68,7 @@ namespace Akka.Persistence.ServiceFabric.Snapshot
         /// </summary>
         protected async override Task<SelectedSnapshot> LoadAsync(string persistenceId, SnapshotSelectionCriteria criteria)
         {
-            ServiceEventSource.Current.Message($"Entering {nameof(LoadAsync)} PersistenceId: {persistenceId} ");
+            ServiceEventSource.Current.Message($"Entering ServiceFabricSnapshotStore.{nameof(LoadAsync)} PersistenceId: {persistenceId} ");
 
             SnapshotEntry snapshot = null;
             if (criteria.MaxSequenceNr > 0 && criteria.MaxSequenceNr < long.MaxValue)
@@ -122,11 +99,11 @@ namespace Akka.Persistence.ServiceFabric.Snapshot
 
         /// <summary>
         /// Asynchronously stores a snapshot with metadata as object in the reliable dictionary, saves the highest Sequence number 
-        /// separatley to allow the last one to be found by sequence number.
+        /// separatly to allow the last one to be found by sequence number.
         /// </summary>
         protected async override Task SaveAsync(SnapshotMetadata metadata, object snapshot)
         {
-            ServiceEventSource.Current.Message($"Entering {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr}");
+            ServiceEventSource.Current.Message($"Entering ServiceFabricSnapshotStore.{nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr}");
 
             var snapshotEntry = new SnapshotEntry
             {
@@ -137,62 +114,27 @@ namespace Akka.Persistence.ServiceFabric.Snapshot
                 Timestamp = metadata.Timestamp.Ticks
             };
 
-            //var snapshotSequenceNumberIndex = new SnapshotSequenceNumberIndex
-            //{
-            //    Id = metadata.PersistenceId + "_" + metadata.SequenceNr,
-            //};
+            var snapshotEntryId = metadata.PersistenceId + "_" + metadata.SequenceNr;
+            
             using (var tx = this.StateManager.CreateTransaction())
             {
                 var snapshotStorageCurrentHighSequenceNumber = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>("SnapshotStorageCurrentHighSequenceNumber");
 
-                //ServiceEventSource.Current.Message($"In {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr} 1");
-                var resultCurrentHighSquenceNumber = await snapshotStorageCurrentHighSequenceNumber.GetOrAddAsync(tx, metadata.PersistenceId, ssschsn => metadata.SequenceNr);
+                var resultCurrentHighSquenceNumber = await snapshotStorageCurrentHighSequenceNumber.AddOrUpdateAsync(tx, metadata.PersistenceId, metadata.SequenceNr, (ssschsn, lng) => metadata.SequenceNr);
+                
                 ServiceEventSource.Current.Message($"resultCurrentHighSquenceNumber: {resultCurrentHighSquenceNumber}");
-                //ServiceEventSource.Current.Message($"In {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr} 2");
-
+   
                 var snapshots = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, SnapshotEntry>>(metadata.PersistenceId);
                 var resultSnapshotAdd = await snapshots.GetOrAddAsync(tx, snapshotEntry.Id, ssid => snapshotEntry);
-                ServiceEventSource.Current.Message($"resultSnapshotAdd: {resultSnapshotAdd}");
-                //ServiceEventSource.Current.Message($"In {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr} 3");
 
+                ServiceEventSource.Current.Message($"resultSnapshotAdd: {resultSnapshotAdd}");
+               
                 await tx.CommitAsync();
-                ServiceEventSource.Current.Message($"Leaving {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr} 4");
+                ServiceEventSource.Current.Message($"Leaving {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr}");
             }
            
-
-
-            //using (var tx = this.StateManager.CreateTransaction())
-            //{
-            //    ServiceEventSource.Current.Message($"trying to out put dictionary for {metadata.PersistenceId} {metadata.SequenceNr}");
-            //    var snapshotStorageCurrentHighSequenceNumber = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, SnapshotEntry>>("SnapshotStorageCurrentHighSequenceNumber");
-
-            //    var SnapshotStorageCurrentHighSequenceNumberEnumerable = await snapshotStorageCurrentHighSequenceNumber.CreateEnumerableAsync(tx);
-            //    using (var enumerator = SnapshotStorageCurrentHighSequenceNumberEnumerable.GetAsyncEnumerator())
-            //    {
-            //        while (await enumerator.MoveNextAsync(CancellationToken.None))
-            //        {
-
-            //            var key = enumerator.Current.Key;
-            //            var value = enumerator.Current.Value;
-            //            ServiceEventSource.Current.Message($"{key} {value.ToString()}");
-            //        }
-            //    }
-            //}
-
-            //using (var tx = this.StateManager.CreateTransaction())
-            //{
-            //    var snapshots = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, SnapshotEntry>>(metadata.PersistenceId);
-
-            //   await tx.CommitAsync();
-            //    ServiceEventSource.Current.Message($"Entering {nameof(SaveAsync)} PersistenceId: {metadata.PersistenceId} SequencNumer: {metadata.SequenceNr} 44");
-            //}
-
             return;
         }
     }
 
-    internal class SnapshotStorageMetaData
-    {
-        public long FirstSequenceNumber { get; internal set; }
-    }
 }

@@ -18,9 +18,9 @@ namespace Akka.Persistence.ServiceFabric
 
         internal static StatefulService StatefulService;
 
-        private StatefulServiceContext context;
+        //private StatefulServiceContext context;
 
-        private IReliableStateManager reliableStateManager;
+        //private IReliableStateManager reliableStateManager;
 
         public AkkaStatefulService(StatefulServiceContext context)
             : this(context, new InitializationCallbackAdapter())
