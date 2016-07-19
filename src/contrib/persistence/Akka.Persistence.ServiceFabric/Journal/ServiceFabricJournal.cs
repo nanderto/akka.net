@@ -18,6 +18,7 @@ namespace Akka.Persistence.ServiceFabric.Journal
 {
     using Microsoft.ServiceFabric.Data;
     using Microsoft.ServiceFabric.Data.Collections;
+    using System.Threading;
     using Messages = Microsoft.ServiceFabric.Data.Collections.IReliableDictionary<string, LinkedList<IPersistentRepresentation>>;
 
     /// <summary>
@@ -43,7 +44,8 @@ namespace Akka.Persistence.ServiceFabric.Journal
         /// <returns></returns>
         protected async override Task<IImmutableList<Exception>> WriteMessagesAsync(IEnumerable<AtomicWrite> messages)
         {
-            IReliableDictionary<string, LinkedList<IPersistentRepresentation>> messagelist = null;
+            IReliableDictionary<string, LinkedList<IPersistentRepresentation>> messageLinkedList = null;
+            IReliableDictionary<long, LinkedList<IPersistentRepresentation>> messageList = null;
 
             using (var tx = this.StateManager.CreateTransaction())
             {
@@ -51,13 +53,26 @@ namespace Akka.Persistence.ServiceFabric.Journal
                 {
                     foreach (var payload in (IEnumerable<IPersistentRepresentation>)message.Payload)
                     {
-                        if (messagelist == null)
+                        if (messageLinkedList == null)
                         {
-                            messagelist = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{payload.PersistenceId}");
+                            messageLinkedList = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{payload.PersistenceId}");
+                            //messageList = await this.StateManager.GetOrAddAsync<IReliableDictionary<long, LinkedList<IPersistentRepresentation>>>($"Messages_{payload.PersistenceId}");
                         }
 
-                        var list = await messagelist.GetOrAddAsync(tx, payload.PersistenceId, pid => new LinkedList<IPersistentRepresentation>());
+                        var list = await messageLinkedList.GetOrAddAsync(tx, payload.PersistenceId, pid => new LinkedList<IPersistentRepresentation>());
+                        //var source = System.Threading.CancellationTokenSource.CreateLinkedTokenSource();
+                        CancellationTokenSource cts = new CancellationTokenSource();
+                        CancellationToken token = cts.Token;
+
+
                         list.AddLast(payload);
+                        await messageLinkedList.AddOrUpdateAsync(tx, payload.PersistenceId,list, (ll, a) =>
+                        {
+                            var x = ll;
+                            return list;
+                        }, 
+                        TimeSpan.FromSeconds(5), 
+                        token);
                     }
                 }
 

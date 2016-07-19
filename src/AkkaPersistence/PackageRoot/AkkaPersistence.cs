@@ -115,7 +115,7 @@ namespace AkkaPersistence
 
                 if (counter % 10 == 0)
                 {
-                    logger.Tell("Boom");
+                    //logger.Tell("Boom");
                 }
 
                 if (counter % 5 == 0)
