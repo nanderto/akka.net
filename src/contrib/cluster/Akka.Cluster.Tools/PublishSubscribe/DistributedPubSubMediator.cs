@@ -1,6 +1,6 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="DistributedPubSubMediator.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+//     Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
 //     Copyright (C) 2013-2016 Akka.NET project <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
@@ -15,6 +15,7 @@ using Akka.Event;
 using Akka.Pattern;
 using Akka.Routing;
 using Akka.Util;
+using Akka.Util.Internal;
 using Status = Akka.Cluster.Tools.PublishSubscribe.Internal.Status;
 
 namespace Akka.Cluster.Tools.PublishSubscribe
@@ -112,6 +113,7 @@ namespace Akka.Cluster.Tools.PublishSubscribe
         private readonly TimeSpan _pruneInterval;
 
         private ISet<Address> _nodes = new HashSet<Address>();
+        private long deltaCount = 0L;
         private ILoggingAdapter _log;
         private IDictionary<Address, Bucket> _registry = new Dictionary<Address, Bucket>();
 
@@ -147,30 +149,32 @@ namespace Akka.Cluster.Tools.PublishSubscribe
                 var routees = new List<Routee>();
 
                 Bucket bucket;
-                if (_registry.TryGetValue(_cluster.SelfAddress, out bucket))
+                ValueHolder valueHolder;
+                if (_registry.TryGetValue(_cluster.SelfAddress, out bucket) && bucket.Content.TryGetValue(send.Path, out valueHolder) && send.LocalAffinity)
                 {
-                    ValueHolder valueHolder;
-                    if (bucket.Content.TryGetValue(send.Path, out valueHolder) && send.LocalAffinity)
+                    var routee = valueHolder.Routee;
+                    if (routee != null) routees.Add(routee);
+                }
+                else
+                {
+                    foreach (var entry in _registry)
                     {
-                        var routee = valueHolder.Routee;
-                        if (routee != null) routees.Add(routee);
-                    }
-                    else
-                    {
-                        foreach (var entry in _registry)
+                        if (entry.Value.Content.TryGetValue(send.Path, out valueHolder))
                         {
-                            if (entry.Value.Content.TryGetValue(send.Path, out valueHolder))
-                            {
-                                var routee = valueHolder.Routee;
-                                if (routee != null) routees.Add(routee);
-                            }
+                            var routee = valueHolder.Routee;
+                            if (routee != null) routees.Add(routee);
                         }
                     }
                 }
 
                 if (routees.Count != 0)
                 {
-                    new Router(_settings.RoutingLogic, routees.ToArray()).Route(Utils.WrapIfNeeded(send.Message), Sender);
+                    new Router(_settings.RoutingLogic, routees.ToArray()).Route(
+                        Internal.Utils.WrapIfNeeded(send.Message), Sender);
+                }
+                else
+                {
+                    SendToDeadLetters(send.Message);
                 }
             });
             Receive<SendToAll>(sendToAll =>
@@ -188,8 +192,10 @@ namespace Akka.Cluster.Tools.PublishSubscribe
             });
             Receive<Put>(put =>
             {
-                if (!string.IsNullOrEmpty(put.Ref.Path.Address.Host))
+                if (put.Ref.Path.Address.HasGlobalScope)
+                {
                     Log.Warning("Registered actor must be local: [{0}]", put.Ref);
+                }
                 else
                 {
                     PutToRegistry(put.Ref.Path.ToStringWithoutAddress(), put.Ref);
@@ -251,16 +257,23 @@ namespace Akka.Cluster.Tools.PublishSubscribe
             });
             Receive<Status>(status =>
             {
-                // gossip chat starts with a Status message, containing the bucket versions of the other node
-                var delta = CollectDelta(status.Versions).ToArray();
-                if (delta.Length != 0)
-                    Sender.Tell(new Delta(delta));
+                // only accept status from known nodes, otherwise old cluster with same address may interact
+                // also accept from local for testing purposes
+                if (_nodes.Contains(Sender.Path.Address) || Sender.Path.Address.HasLocalScope)
+                {
+                    // gossip chat starts with a Status message, containing the bucket versions of the other node
+                    var delta = CollectDelta(status.Versions).ToArray();
+                    if (delta.Length != 0)
+                        Sender.Tell(new Delta(delta));
 
-                if (OtherHasNewerVersions(status.Versions))
-                    Sender.Tell(new Status(OwnVersions));
+                    if (!status.IsReplyToStatus && OtherHasNewerVersions(status.Versions))
+                        Sender.Tell(new Status(versions: OwnVersions, isReplyToStatus: true)); // it will reply with Delta
+                }
             });
             Receive<Delta>(delta =>
             {
+                deltaCount += 1;
+
                 // reply from Status message in the gossip chat
                 // the Delta contains potential updates (newer versions) from the other node
                 // only accept deltas/buckets from known nodes, otherwise there is a risk of
@@ -277,7 +290,7 @@ namespace Akka.Cluster.Tools.PublishSubscribe
 
                             if (bucket.Version > myBucket.Version)
                             {
-                                _registry.Add(bucket.Owner, new Bucket(myBucket.Owner, bucket.Version, myBucket.Content.AddRange(bucket.Content)));
+                                _registry[bucket.Owner] = new Bucket(myBucket.Owner, bucket.Version, myBucket.Content.SetItems(bucket.Content));
                             }
                         }
                     }
@@ -311,6 +324,14 @@ namespace Akka.Cluster.Tools.PublishSubscribe
             {
                 if (IsMatchingRole(up.Member)) _nodes.Add(up.Member.Address);
             });
+            Receive<ClusterEvent.MemberLeft>(left =>
+            {
+                if (IsMatchingRole(left.Member))
+                {
+                    _nodes.Remove(left.Member.Address);
+                    _registry.Remove(left.Member.Address);
+                }
+            });
             Receive<ClusterEvent.MemberRemoved>(removed =>
             {
                 var member = removed.Member;
@@ -330,6 +351,10 @@ namespace Akka.Cluster.Tools.PublishSubscribe
                 var count = _registry.Sum(entry => entry.Value.Content.Count(kv => kv.Value.Ref != null));
                 Sender.Tell(count);
             });
+            Receive<DeltaCount>(_ =>
+            {
+                Sender.Tell(deltaCount);
+            });
         }
 
         private bool OtherHasNewerVersions(IDictionary<Address, long> versions)
@@ -337,20 +362,22 @@ namespace Akka.Cluster.Tools.PublishSubscribe
             return versions.Any(entry =>
             {
                 Bucket bucket;
-                return (!_registry.TryGetValue(entry.Key, out bucket) && entry.Value > bucket.Version)
-                       || entry.Value > 0L;
+	            if (_registry.TryGetValue(entry.Key, out bucket))
+	            {
+		            return entry.Value > bucket.Version;
+	            }
+	            return entry.Value > 0L;
             });
         }
 
         private IEnumerable<Bucket> CollectDelta(IDictionary<Address, long> versions)
         {
             // missing entries are represented by version 0
-            var filledOtherVersions = new Dictionary<Address, long>(versions);
-            foreach (var entry in OwnVersions)
-                if (filledOtherVersions.ContainsKey(entry.Key))
-                    filledOtherVersions[entry.Key] = 0L;
-                else
-                    filledOtherVersions.Add(entry.Key, 0L);
+            var filledOtherVersions = OwnVersions.ToDictionary(c => c.Key, c => 0L);
+            foreach (var version in versions)
+            {
+                filledOtherVersions[version.Key] = version.Value;
+            }
 
             var count = 0;
             foreach (var entry in filledOtherVersions)
@@ -426,23 +453,32 @@ namespace Akka.Cluster.Tools.PublishSubscribe
             }
             else
             {
-                _registry[_cluster.SelfAddress] = new Bucket(bucket.Owner, v, bucket.Content.Add(key, new ValueHolder(v, value)));
+                _registry[_cluster.SelfAddress] = new Bucket(bucket.Owner, v, bucket.Content.SetItem(key, new ValueHolder(v, value)));
             }
         }
 
-        private void PublishMessage(string path, object message, bool excludeSelf = false)
+        private void SendToDeadLetters(object message)
+        {
+            Context.System.DeadLetters.Tell(new DeadLetter(message, Sender, Context.Self));
+        }
+
+        private void PublishMessage(string path, object message, bool allButSelf = false)
         {
             foreach (var entry in _registry)
             {
                 var address = entry.Key;
                 var bucket = entry.Value;
 
-                if (!(excludeSelf && address == _cluster.SelfAddress))
+                if (!(allButSelf && address == _cluster.SelfAddress) && bucket.Content.ContainsKey(path))
                 {
                     var valueHolder = bucket.Content[path];
                     if (valueHolder != null && !valueHolder.Ref.Equals(ActorRefs.Nobody))
                     {
                         valueHolder.Ref.Forward(message);
+                    }
+                    else
+                    {
+                        SendToDeadLetters(message);
                     }
                 }
             }
@@ -453,14 +489,21 @@ namespace Akka.Cluster.Tools.PublishSubscribe
             var prefix = path + "/";
             var lastKey = path + "0";   // '0' is the next char of '/'
 
-            var groups = ExtractGroups(prefix, lastKey).GroupBy(kv => kv.Key);
+            var groups = ExtractGroups(prefix, lastKey).GroupBy(kv => kv.Key).ToList();
             var wrappedMessage = new SendToOneSubscriber(message);
 
-            foreach (var g in groups)
+            if (groups.Count == 0)
             {
-                var routees = g.Select(r => r.Value).ToArray();
-                if (routees.Length != 0)
-                    new Router(_settings.RoutingLogic, routees).Route(wrappedMessage, Sender);
+                SendToDeadLetters(message);
+            }
+            else
+            {
+                foreach (var g in groups)
+                {
+                    var routees = g.Select(r => r.Value).ToArray();
+                    if (routees.Length != 0)
+                        new Router(_settings.RoutingLogic, routees).Route(wrappedMessage, Sender);
+                }
             }
         }
 
@@ -503,7 +546,8 @@ namespace Akka.Cluster.Tools.PublishSubscribe
 
         private void GossipTo(Address address)
         {
-            Context.ActorSelection(Self.Path.ToStringWithAddress(address)).Tell(new Status(OwnVersions));
+            var sel = Context.ActorSelection(Self.Path.ToStringWithAddress(address));
+            sel.Tell(new Status(versions: OwnVersions, isReplyToStatus: false));
         }
 
         private Address SelectRandomNode(IList<Address> addresses)

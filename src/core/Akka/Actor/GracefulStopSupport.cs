@@ -1,11 +1,12 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="GracefulStopSupport.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+//     Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
 //     Copyright (C) 2013-2016 Akka.NET project <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
 using System;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Akka.Dispatch.SysMsg;
@@ -42,39 +43,35 @@ namespace Akka.Actor
         public static Task<bool> GracefulStop(this IActorRef target, TimeSpan timeout, object stopMessage)
         {
             var internalTarget = target.AsInstanceOf<IInternalActorRef>();
-            if (internalTarget.IsTerminated) return Task.Run(() => true);
 
-            var provider = Futures.ResolveProvider(target);
-            var promise = new TaskCompletionSource<object>();
-
-            //set up the timeout
-            var cancellationSource = new CancellationTokenSource();
-            cancellationSource.Token.Register(() => promise.TrySetCanceled());
-            cancellationSource.CancelAfter(timeout);
-
-            //create a new tempcontainer path
-            var path = provider.TempPath();
-            //callback to unregister from tempcontainer
-            Action unregister = () => provider.UnregisterTempActor(path);
-
-            var fref = new FutureActorRef(promise, unregister, path);
-            internalTarget.Tell(new Watch(internalTarget, fref));
+            var promiseRef = PromiseActorRef.Apply(internalTarget.Provider, timeout, target, stopMessage.GetType().Name);
+            internalTarget.SendSystemMessage(new Watch(internalTarget, promiseRef));
             target.Tell(stopMessage, ActorRefs.NoSender);
-            return promise.Task.ContinueWith(t =>
+            return promiseRef.Result.ContinueWith(t =>
             {
-                var returnResult = false;
-                PatternMatch.Match(t.Result)
-                    .With<Terminated>(terminated =>
-                    {
-                        returnResult = (terminated.ActorRef.Path.Equals(target.Path));
-                    })
-                    .Default(m =>
-                    {
-                        returnResult = false;
-                    });
-
-                internalTarget.Tell(new Unwatch(target, fref));
-                return returnResult;
+                if (t.Status == TaskStatus.RanToCompletion)
+                {
+                    var returnResult = false;
+                    PatternMatch.Match(t.Result)
+                        .With<Terminated>(terminated =>
+                        {
+                            returnResult = (terminated.ActorRef.Path.Equals(target.Path));
+                        })
+                        .Default(m =>
+                        {
+                            internalTarget.SendSystemMessage(new Unwatch(internalTarget, promiseRef));
+                            returnResult = false;
+                        });
+                    return returnResult;
+                }
+                else
+                {
+                    internalTarget.SendSystemMessage(new Unwatch(internalTarget, promiseRef));
+                    if (t.Status == TaskStatus.Canceled)
+                        throw new TaskCanceledException();
+                    else
+                        throw t.Exception;
+                }
             }, TaskContinuationOptions.ExecuteSynchronously);
         }
     }

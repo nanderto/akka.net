@@ -1,6 +1,6 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="SnapshotStoreSpec.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2016 Typesafe Inc. <http://www.typesafe.com>
+//     Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
 //     Copyright (C) 2013-2016 Akka.NET project <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
@@ -211,7 +211,7 @@ namespace Akka.Persistence.TestKit.Snapshot
                 && result.Snapshot.Snapshot.ToString() == "s-4");
         }
 
-        [Fact(Skip = "This is not yet supported by the snapshot stores")]
+        [Fact]
         public void SnapshotStore_should_save_and_overwrite_snapshot_with_same_sequence_number()
         {
             var md = Metadata[4];
