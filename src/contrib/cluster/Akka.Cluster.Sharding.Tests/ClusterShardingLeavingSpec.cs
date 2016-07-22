@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Akka.Actor;
+using Akka.Cluster.TestKit;
 using Akka.Cluster.Tests.MultiNode;
 using Akka.Configuration;
 using Akka.Persistence.Journal;
@@ -32,7 +33,6 @@ namespace Akka.Cluster.Sharding.Tests
                 akka.actor.provider = ""Akka.Cluster.ClusterActorRefProvider""
                 akka.remote.log-remote-lifecycle-events = off
                 akka.cluster.auto-down-unreachable-after = 0s
-                akka.cluster.down-removal-margin = 5s
                 akka.persistence.journal.plugin = ""Akka.Persistence.Journal.in-mem""
                 akka.persistence.journal.in-mem {
                   timeout = 5s

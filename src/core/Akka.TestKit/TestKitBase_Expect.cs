@@ -134,8 +134,11 @@ namespace Akka.TestKit
         /// </summary>       
         public Terminated ExpectTerminated(IActorRef target, TimeSpan? timeout = null, string hint = null)
         {
-            var msg = string.Format("Terminated {0}. {1}", target.Path, hint ?? "");
-            return InternalExpectMsg<Terminated>(RemainingOrDilated(timeout), terminated => _assertions.AssertEqual(target, terminated.ActorRef, msg), msg);
+            var msg = string.Format("Terminated {0}. {1}", target, hint ?? "");
+            return InternalExpectMsg<Terminated>(RemainingOrDilated(timeout), terminated =>
+            {
+                _assertions.AssertEqual(target, terminated.ActorRef, msg);
+            }, msg);
         }
 
 

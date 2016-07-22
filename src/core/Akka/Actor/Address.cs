@@ -64,6 +64,25 @@ namespace Akka.Actor
             get { return _protocol; }
         }
 
+        /// <summary>
+        /// Returns true if this Address is only defined locally. It is not safe to send locally scoped addresses to remote
+        ///  hosts. See also <see cref="HasGlobalScope"/>
+        /// </summary>
+        public bool HasLocalScope
+        {
+            get { return string.IsNullOrEmpty(Host); }
+        }
+
+        /// <summary>
+        /// Returns true if this Address is usable globally. Unlike locally defined addresses <see cref="HasLocalScope"/>
+        /// addresses of global scope are safe to sent to other hosts, as they globally and uniquely identify an addressable
+        /// entity.
+        /// </summary>
+        public bool HasGlobalScope
+        {
+            get { return !string.IsNullOrEmpty(Host); }
+        }
+
         private Lazy<string> CreateLazyToString()
         {
             return new Lazy<string>(() =>
@@ -172,6 +191,9 @@ namespace Akka.Actor
             {
                 var systemName = uri.UserInfo;
                 var host = uri.Host;
+                /*
+                 * Aaronontheweb: in the event that an Address is passed in with port 0, the Uri converts it to -1 (which is invalid.)
+                 */
                 var port = uri.Port;
 
                 return new Address(protocol, systemName, host, port);

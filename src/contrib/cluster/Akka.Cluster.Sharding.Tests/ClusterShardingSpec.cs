@@ -13,6 +13,7 @@ using Akka.Configuration;
 using Akka.Persistence;
 using Akka.Remote.TestKit;
 using Akka.Actor;
+using Akka.Cluster.TestKit;
 using Akka.Cluster.Tests.MultiNode;
 using Akka.Cluster.Tools.Singleton;
 using Akka.Pattern;
@@ -41,7 +42,6 @@ namespace Akka.Cluster.Sharding.Tests
                 akka.actor.provider = ""Akka.Cluster.ClusterActorRefProvider""
                 akka.remote.log-remote-lifecycle-events = off
                 akka.cluster.auto-down-unreachable-after = 0s
-                akka.cluster.down-removal-margin = 5s
                 akka.cluster.roles = [""backend""]
                 akka.persistence.journal.plugin = ""akka.persistence.journal.leveldb-shared""
                 akka.persistence.journal.leveldb-shared.store {

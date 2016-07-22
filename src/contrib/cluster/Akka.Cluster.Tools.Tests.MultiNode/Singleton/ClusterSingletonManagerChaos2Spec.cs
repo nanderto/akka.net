@@ -8,6 +8,7 @@
 using System;
 using System.Linq;
 using Akka.Actor;
+using Akka.Cluster.TestKit;
 using Akka.Cluster.Tests.MultiNode;
 using Akka.Cluster.Tools.Singleton;
 using Akka.Configuration;
@@ -123,7 +124,7 @@ namespace Akka.Cluster.Tools.Tests.MultiNode.Singleton
                 {
                     Echo(_config.Fourth).Tell("hello");
                     var address = ExpectMsg<IActorRef>(TimeSpan.FromSeconds(3)).Path.Address;
-                    Assert.Equal(address, GetAddress(_config.Fourth));
+                    GetAddress(_config.Fourth).Should().Be(address);
                 }, _config.Controller);
                 EnterBarrier("_config.Fourth-verified");
             });

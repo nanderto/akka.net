@@ -95,8 +95,8 @@ namespace Akka.Actor
             {
                 if (Interlocked.Exchange(ref status, COMPLETED) == INITIATED)
                 {
-                    _unregister();
                     _result.TrySetResult(message);
+                    _unregister();
                 }
             }
         }
@@ -162,7 +162,7 @@ namespace Akka.Actor
                 Path = path;
             }
 
-            public string Path { get; private set; }
+            public string Path { get; }
 
             public ISurrogated FromSurrogate(ActorSystem system)
             {
@@ -186,7 +186,8 @@ namespace Akka.Actor
 
         public override string ToString()
         {
-            return string.Format("[{0}]", Path);
+            if(Path.Uid == ActorCell.UndefinedUid) return $"[{Path}]";
+            return $"[{Path}#{Path.Uid}]";
         }
 
         public override bool Equals(object obj)
@@ -216,7 +217,8 @@ namespace Akka.Actor
 
         public bool Equals(IActorRef other)
         {
-            return Path.Uid == other.Path.Uid && Path.Equals(other.Path);
+            return Path.Uid == other.Path.Uid 
+                && Path.Equals(other.Path);
         }
 
         public int CompareTo(IActorRef other)

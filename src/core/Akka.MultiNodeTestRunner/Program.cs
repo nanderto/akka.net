@@ -113,11 +113,11 @@ namespace Akka.MultiNodeTestRunner
             var tcpLogger = TestRunSystem.ActorOf(Props.Create(() => new TcpLoggingServer(SinkCoordinator)), "TcpLogger");
             TestRunSystem.Tcp().Tell(new Tcp.Bind(tcpLogger, listenEndpoint));
 
-            var assemblyName = Path.GetFullPath(args[0]);
+            var assemblyName = Path.GetFullPath(args[0].Trim('"')); //unquote the string first
             EnableAllSinks(assemblyName);
             PublishRunnerMessage(String.Format("Running MultiNodeTests for {0}", assemblyName));
 
-            using (var controller = new XunitFrontController(assemblyName))
+            using (var controller = new XunitFrontController(AppDomainSupport.IfAvailable, assemblyName))
             {
                 using (var discovery = new Discovery())
                 {

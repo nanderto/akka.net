@@ -11,6 +11,7 @@ using Akka.Actor;
 using Akka.Configuration;
 using Akka.DI.Core;
 using Akka.Dispatch;
+using Akka.Dispatch.MessageQueues;
 using Akka.TestKit;
 using Akka.TestKit.TestActors;
 using Akka.TestKit.Xunit2;
@@ -333,9 +334,10 @@ namespace Akka.DI.TestKit
             var stashActorProps = Sys.DI().Props<DiPerRequestActor>();
             var stashActor = Sys.ActorOf(stashActorProps);
 
-            var internalRef = (LocalActorRef)stashActor;
+            var internalRef = (RepointableActorRef)stashActor;
+            AwaitCondition(() => internalRef.IsStarted);
 
-            Assert.IsType<UnboundedMailbox>(internalRef.Cell.Mailbox);
+            Assert.IsType<UnboundedMessageQueue>(internalRef.Underlying.AsInstanceOf<ActorCell>().Mailbox.MessageQueue);
         }
 
         [Fact]
@@ -344,9 +346,10 @@ namespace Akka.DI.TestKit
             var stashActorProps = Sys.DI().Props<UnboundedStashActor>();
             var stashActor = Sys.ActorOf(stashActorProps);
 
-            var internalRef = (LocalActorRef) stashActor;
+            var internalRef = (RepointableActorRef)stashActor;
+            AwaitCondition(() => internalRef.IsStarted);
 
-            Assert.IsType<UnboundedDequeBasedMailbox>(internalRef.Cell.Mailbox);
+            Assert.IsType<UnboundedDequeMessageQueue>(internalRef.Underlying.AsInstanceOf<ActorCell>().Mailbox.MessageQueue);
         }
 
         [Fact]
@@ -355,9 +358,10 @@ namespace Akka.DI.TestKit
             var stashActorProps = Sys.DI().Props<BoundedStashActor>();
             var stashActor = Sys.ActorOf(stashActorProps);
 
-            var internalRef = (LocalActorRef)stashActor;
+            var internalRef = (RepointableActorRef)stashActor;
+            AwaitCondition(() => internalRef.IsStarted);
 
-            Assert.IsType<BoundedDequeBasedMailbox>(internalRef.Cell.Mailbox);
+            Assert.IsType<BoundedDequeMessageQueue>(internalRef.Underlying.AsInstanceOf<ActorCell>().Mailbox.MessageQueue);
         }
 
         [Fact]

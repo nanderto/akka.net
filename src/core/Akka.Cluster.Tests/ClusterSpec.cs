@@ -13,26 +13,28 @@ using Akka.Configuration;
 using Akka.TestKit;
 using Akka.Util.Internal;
 using Xunit;
+using FluentAssertions;
 
 namespace Akka.Cluster.Tests
 {
     public class ClusterSpec : AkkaSpec
     {
         const string Config = @"    
-        akka.cluster {
-            auto-down-unreachable-after = 0s
-            periodic-tasks-initial-delay = 120 s // turn off scheduled tasks
-            publish-stats-interval = 0 s # always, when it happens
-        }
-        akka.actor.provider = ""Akka.Cluster.ClusterActorRefProvider, Akka.Cluster""
-        akka.remote.helios.tcp.port = 0";
+            akka.cluster {
+              auto-down-unreachable-after = 0s
+              periodic-tasks-initial-delay = 120 s
+              publish-stats-interval = 0 s # always, when it happens
+            }
+            akka.actor.provider = ""Akka.Cluster.ClusterActorRefProvider, Akka.Cluster""
+            akka.remote.log-remote-lifecycle-events = off
+            akka.remote.helios.tcp.port = 0";
 
         public IActorRef Self { get { return TestActor; } }
 
         readonly Address _selfAddress;
         readonly Cluster _cluster;
-        
-        public ClusterReadView ClusterView { get { return _cluster.ReadView; } }
+
+        internal ClusterReadView ClusterView { get { return _cluster.ReadView; } }
 
         public ClusterSpec()
             : base(Config)
@@ -49,19 +51,20 @@ namespace Akka.Cluster.Tests
         [Fact]
         public void A_cluster_must_use_the_address_of_the_remote_transport()
         {
-            Assert.Equal(_selfAddress, _cluster.SelfAddress);
+            _cluster.SelfAddress.Should().Be(_selfAddress);
         }
 
         [Fact]
         public void A_cluster_must_initially_become_singleton_cluster_when_joining_itself_and_reach_convergence()
         {
-            Assert.Equal(0, ClusterView.Members.Count);
+            ClusterView.Members.Count.Should().Be(0);
             _cluster.Join(_selfAddress);
             LeaderActions(); // Joining -> Up
             AwaitCondition(() => ClusterView.IsSingletonCluster);
-            Assert.Equal(_selfAddress, ClusterView.Self.Address);
-            Assert.Equal(ImmutableHashSet.Create(_selfAddress), ClusterView.Members.Select(m => m.Address).ToImmutableHashSet());
-            AwaitAssert(() => Assert.Equal(MemberStatus.Up, ClusterView.Status));
+            ClusterView.Self.Address.Should().Be(_selfAddress);
+            ClusterView.Members.Select(m => m.Address).ToImmutableHashSet()
+                .Should().BeEquivalentTo(ImmutableHashSet.Create(_selfAddress));
+            AwaitAssert(() => ClusterView.Status.Should().Be(MemberStatus.Up));
         }
 
         [Fact]
@@ -69,7 +72,7 @@ namespace Akka.Cluster.Tests
         {
             try
             {
-                _cluster.Subscribe(TestActor, ClusterEvent.InitialStateAsSnapshot, new []{typeof(ClusterEvent.IMemberEvent)});
+                _cluster.Subscribe(TestActor, ClusterEvent.InitialStateAsSnapshot, new[] { typeof(ClusterEvent.IMemberEvent) });
                 ExpectMsg<ClusterEvent.CurrentClusterState>();
             }
             finally
@@ -83,8 +86,10 @@ namespace Akka.Cluster.Tests
         {
             try
             {
+                // TODO: this should be removed
                 _cluster.Join(_selfAddress);
                 LeaderActions(); // Joining -> Up
+
                 _cluster.Subscribe(TestActor, ClusterEvent.InitialStateAsEvents, new[] { typeof(ClusterEvent.IMemberEvent) });
                 ExpectMsg<ClusterEvent.MemberUp>();
             }
@@ -105,6 +110,7 @@ namespace Akka.Cluster.Tests
         [Fact]
         public void A_cluster_must_publish_member_removed_when_shutdown()
         {
+            // TODO: this should be removed
             _cluster.Join(_selfAddress);
             LeaderActions(); // Joining -> Up
 
@@ -114,19 +120,17 @@ namespace Akka.Cluster.Tests
                 callbackProbe.Tell("OnMemberRemoved");
             });
 
-            _cluster.Subscribe(TestActor, new []{typeof(ClusterEvent.MemberRemoved)});
+            _cluster.Subscribe(TestActor, new[] { typeof(ClusterEvent.MemberRemoved) });
             // first, is in response to the subscription
             ExpectMsg<ClusterEvent.CurrentClusterState>();
 
             _cluster.Shutdown();
-            var memberRemoved = ExpectMsg<ClusterEvent.MemberRemoved>();
-            Assert.Equal(_selfAddress, memberRemoved.Member.Address);
+            ExpectMsg<ClusterEvent.MemberRemoved>().Member.Address.Should().Be(_selfAddress);
 
             callbackProbe.ExpectMsg("OnMemberRemoved");
         }
 
-        // TODO: https://github.com/akkadotnet/akka.net/issues/1983
-        [Fact(Skip = "fails for now - will need to implement https://github.com/akkadotnet/akka.net/issues/1983")]
+        [Fact]
         public void A_cluster_must_be_allowed_to_join_and_leave_with_local_address()
         {
             var sys2 = ActorSystem.Create("ClusterSpec2", ConfigurationFactory.ParseString(@"akka.actor.provider = ""Akka.Cluster.ClusterActorRefProvider, Akka.Cluster""
@@ -134,24 +138,24 @@ namespace Akka.Cluster.Tests
 
             try
             {
-                var ref2 = sys2.ActorOf(Props.Empty);
-                Cluster.Get(sys2).Join(ref2.Path.Address); // address doesn't contain full address information
-                Within(TimeSpan.FromSeconds(5), () =>
+                var @ref = sys2.ActorOf(Props.Empty);
+                Cluster.Get(sys2).Join(@ref.Path.Address); // address doesn't contain full address information
+                Within(5.Seconds(), () =>
                 {
                     AwaitAssert(() =>
                     {
-                        Cluster.Get(sys2).State.Members.Count.ShouldBe(1);
-                        Cluster.Get(sys2).State.Members.First().Status.ShouldBe(MemberStatus.Up);
+                        Cluster.Get(sys2).State.Members.Count.Should().Be(1);
+                        Cluster.Get(sys2).State.Members.First().Status.Should().Be(MemberStatus.Up);
                     });
                 });
 
-                Cluster.Get(sys2).Leave(ref2.Path.Address);
+                Cluster.Get(sys2).Leave(@ref.Path.Address);
 
-                Within(TimeSpan.FromSeconds(5), () =>
+                Within(5.Seconds(), () =>
                 {
                     AwaitAssert(() =>
                     {
-                        Cluster.Get(sys2).IsTerminated.ShouldBe(true);
+                        Cluster.Get(sys2).IsTerminated.Should().BeTrue();
                     });
                 });
             }
@@ -159,6 +163,16 @@ namespace Akka.Cluster.Tests
             {
                 Shutdown(sys2);
             }
+        }
+
+        [Fact]
+        public void A_cluster_must_allow_to_resolve_RemotePathOf_any_actor()
+        {
+            var remotePath = _cluster.RemotePathOf(TestActor);
+
+            TestActor.Path.Address.Host.Should().BeNull();
+            _cluster.RemotePathOf(TestActor).Uid.Should().Be(TestActor.Path.Uid);
+            _cluster.RemotePathOf(TestActor).Address.Should().Be(_selfAddress);
         }
     }
 }

@@ -8,7 +8,7 @@
 using System;
 using System.Linq;
 using Akka.Actor;
-using Akka.Cluster.Tests.MultiNode;
+using Akka.Cluster.TestKit;
 using Akka.Cluster.Tools.Singleton;
 using Akka.Configuration;
 using Akka.Event;
@@ -17,7 +17,6 @@ using Akka.TestKit;
 using Akka.TestKit.Internal.StringMatcher;
 using Akka.TestKit.TestEvent;
 using FluentAssertions;
-using Xunit;
 
 namespace Akka.Cluster.Tools.Tests.MultiNode.Singleton
 {
@@ -496,16 +495,15 @@ namespace Akka.Cluster.Tools.Tests.MultiNode.Singleton
         #endregion
 
 
-        //[MultiNodeFact]
+        [MultiNodeFact]
         public void ClusterSingletonManagerSpecs()
         {
             ClusterSingletonManager_should_startup_6_node_cluster();
             ClusterSingletonManager_should_let_the_proxy_messages_to_the_singleton_in_a_6_node_cluster();
             ClusterSingletonManager_should_handover_when_oldest_leaves_in_6_node_cluster();
             ClusterSingletonManager_should_takeover_when_oldest_crashes_in_5_node_cluster();
-            // TODO: fix specs
-            // ClusterSingletonManager_should_takeover_when_two_oldest_crash_in_3_node_cluster();
-            // ClusterSingletonManager_should_takeover_when_oldest_crashes_in_2_node_cluster();
+            ClusterSingletonManager_should_takeover_when_two_oldest_crash_in_3_node_cluster();
+            ClusterSingletonManager_should_takeover_when_oldest_crashes_in_2_node_cluster();
         }
 
         public void ClusterSingletonManager_should_startup_6_node_cluster()
