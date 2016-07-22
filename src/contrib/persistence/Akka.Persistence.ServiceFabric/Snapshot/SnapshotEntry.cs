@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.Serialization;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Akka.Persistence.ServiceFabric.Snapshot
+﻿namespace Akka.Persistence.ServiceFabric.Snapshot
 {
+    using System.Runtime.Serialization;
+
     [DataContract]
     public class SnapshotEntry
     {

@@ -1,31 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Fabric;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.ServiceFabric.Data.Collections;
-using Microsoft.ServiceFabric.Services.Communication.Runtime;
-using Microsoft.ServiceFabric.Services.Runtime;
-using Microsoft.ServiceFabric.Data;
-using Akka.Persistence.ServiceFabric.Snapshot;
-
-namespace Akka.Persistence.ServiceFabric
+﻿namespace Akka.Persistence.ServiceFabric
 {
+    using System.Fabric;
+    using System.Threading.Tasks;
+    using Akka.Persistence.ServiceFabric.Snapshot;
+    using Microsoft.ServiceFabric.Data;
+    using Microsoft.ServiceFabric.Services.Runtime;
+
     public class AkkaStatefulService : StatefulService
     {
-        internal static StatefulServiceContext ServiceContext;
+        public static StatefulServiceContext ServiceContext;
 
-        internal static StatefulService StatefulService;
-
-        //private StatefulServiceContext context;
-
-        //private IReliableStateManager reliableStateManager;
+        public static StatefulService StatefulService;
 
         public AkkaStatefulService(StatefulServiceContext context)
             : this(context, new InitializationCallbackAdapter())
         {
-                        
         }
 
         public AkkaStatefulService(StatefulServiceContext context, InitializationCallbackAdapter adapter)
@@ -39,12 +28,13 @@ namespace Akka.Persistence.ServiceFabric
 
     public class InitializationCallbackAdapter
     {
+        public IReliableStateManager StateManager { get; set; }
+
         public Task OnInitialize()
         {
             this.StateManager.TryAddStateSerializer(new SnapshotEntrySerializer());
             return Task.FromResult(true);
         }
 
-        public IReliableStateManager StateManager { get; set; }
     }
 }

@@ -113,9 +113,9 @@ namespace AkkaPersistence
 
                 logger.Tell("Increment");
 
-                if (counter % 10 == 0)
+                if (counter % 20 == 0)
                 {
-                    //logger.Tell("Boom");
+                    logger.Tell("Boom");
                 }
 
                 if (counter % 5 == 0)

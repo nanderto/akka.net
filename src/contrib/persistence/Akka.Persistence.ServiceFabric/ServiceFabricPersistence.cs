@@ -1,13 +1,8 @@
-﻿using Akka.Actor;
-using Akka.Configuration;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Akka.Persistence.ServiceFabric
+﻿namespace Akka.Persistence.ServiceFabric
 {
+    using Akka.Actor;
+    using Akka.Configuration;
+
     public class ServiceFabricPersistence : ExtensionIdProvider<ServiceFabricExtension>
     {
         public static readonly ServiceFabricPersistence Instance = new ServiceFabricPersistence();

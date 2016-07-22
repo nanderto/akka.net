@@ -1,25 +1,14 @@
-﻿//-----------------------------------------------------------------------
-// <copyright file="ServiceFabricJournal.cs" company="Akka.NET Project">
-//     Copyright (C) 2013-2016 Akka.NET project <https://github.com/akkadotnet/akka.net>
-// </copyright>
-//-----------------------------------------------------------------------
-
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Linq;
-using System.Threading.Tasks;
-using Akka.Actor;
-using Akka.Persistence.Journal;
-using Akka.Util.Internal;
-
-namespace Akka.Persistence.ServiceFabric.Journal
+﻿namespace Akka.Persistence.ServiceFabric.Journal
 {
+    using Akka.Actor;
+    using Akka.Persistence.Journal;
+    using Akka.Util.Internal;
     using Microsoft.ServiceFabric.Data;
     using Microsoft.ServiceFabric.Data.Collections;
-    using System.Threading;
-    using Messages = Microsoft.ServiceFabric.Data.Collections.IReliableDictionary<string, LinkedList<IPersistentRepresentation>>;
+    using System;
+    using System.Collections.Generic;
+    using System.Collections.Immutable;
+    using System.Threading.Tasks;
 
     /// <summary>
     /// Service Fabric journal.
@@ -27,6 +16,7 @@ namespace Akka.Persistence.ServiceFabric.Journal
     public class ServiceFabricJournal : AsyncWriteJournal
     {
         private readonly IReliableStateManager StateManager;
+
         public ServiceFabricJournal(IReliableStateManager stateManager)
         {
             StateManager = stateManager;
@@ -44,8 +34,10 @@ namespace Akka.Persistence.ServiceFabric.Journal
         /// <returns></returns>
         protected async override Task<IImmutableList<Exception>> WriteMessagesAsync(IEnumerable<AtomicWrite> messages)
         {
-            IReliableDictionary<string, LinkedList<IPersistentRepresentation>> messageLinkedList = null;
-            IReliableDictionary<long, LinkedList<IPersistentRepresentation>> messageList = null;
+            IReliableDictionary<string, JournalEntry> messageList = null;
+            IReliableDictionary<string, string> messageMetadata = null;
+            long highestSequenceNumber = 0L;
+            long newHighestSequenceNumber = 0L;
 
             using (var tx = this.StateManager.CreateTransaction())
             {
@@ -53,28 +45,39 @@ namespace Akka.Persistence.ServiceFabric.Journal
                 {
                     foreach (var payload in (IEnumerable<IPersistentRepresentation>)message.Payload)
                     {
-                        if (messageLinkedList == null)
+                        if (messageList == null)
                         {
-                            messageLinkedList = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{payload.PersistenceId}");
-                            //messageList = await this.StateManager.GetOrAddAsync<IReliableDictionary<long, LinkedList<IPersistentRepresentation>>>($"Messages_{payload.PersistenceId}");
+                            messageList = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, JournalEntry>>($"Messages_{payload.PersistenceId}");
                         }
 
-                        var list = await messageLinkedList.GetOrAddAsync(tx, payload.PersistenceId, pid => new LinkedList<IPersistentRepresentation>());
-                        //var source = System.Threading.CancellationTokenSource.CreateLinkedTokenSource();
-                        CancellationTokenSource cts = new CancellationTokenSource();
-                        CancellationToken token = cts.Token;
-
-
-                        list.AddLast(payload);
-                        await messageLinkedList.AddOrUpdateAsync(tx, payload.PersistenceId,list, (ll, a) =>
+                        if (messageMetadata == null)
                         {
-                            var x = ll;
-                            return list;
-                        }, 
-                        TimeSpan.FromSeconds(5), 
-                        token);
+                            messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{payload.PersistenceId}");
+                            var result = await messageMetadata.TryGetValueAsync(tx, "HighestSequenceNumber");
+
+                            if (result.HasValue)
+                            {
+                                long.TryParse(result.Value, out highestSequenceNumber);
+                                newHighestSequenceNumber = highestSequenceNumber;
+                            }
+                            else
+                            {
+                                var ret = await messageMetadata.TryAddAsync(tx, "HighestSequenceNumber", "0");
+                            }
+                        }
+
+                        if (payload.SequenceNr > newHighestSequenceNumber)
+                        {
+                            newHighestSequenceNumber = payload.SequenceNr;
+                        }
+
+                        var journalEntry = ToJournalEntry(payload);
+
+                        var list = await messageList.TryAddAsync(tx, journalEntry.SequenceNr.ToString(), journalEntry);
                     }
                 }
+
+                await messageMetadata.TryUpdateAsync(tx, "HighestSequenceNumber", newHighestSequenceNumber.ToString(), highestSequenceNumber.ToString());
 
                 await tx.CommitAsync();
             }
@@ -82,18 +85,36 @@ namespace Akka.Persistence.ServiceFabric.Journal
             return (IImmutableList<Exception>) null; // all good
         }
 
+        private JournalEntry ToJournalEntry(IPersistentRepresentation message)
+        {
+            return new JournalEntry
+            {
+                Id = message.PersistenceId + "_" + message.SequenceNr,
+                IsDeleted = message.IsDeleted,
+                Payload = message.Payload,
+                PersistenceId = message.PersistenceId,
+                SequenceNr = message.SequenceNr,
+                Manifest = message.Manifest
+            };
+        }
+
         /// <summary>
         /// Read the highest Sequence number for the Persistance Id provided. from Sequence number is not required in this implementation
         /// </summary>
-        /// <param name="persistenceId"></param>
-        /// <param name="fromSequenceNumber"></param>
-        /// <returns></returns>
+        /// <param name="persistenceId">PersistenceId For this Actor</param>
+        /// <param name="fromSequenceNumber">Minimum Sequence number it could be</param>
+        /// <returns>THe highest Sequence Number</returns>
         public async override Task<long> ReadHighestSequenceNrAsync(string persistenceId, long fromSequenceNumber)
         {
-            return await HighestSequenceNumberAsync(persistenceId);
+            return await this.HighestSequenceNumberAsync(persistenceId);
         }
 
-        public async override Task ReplayMessagesAsync(IActorContext context, string persistenceId, long fromSequenceNumber, long toSequenceNumber, long max,
+        public async override Task ReplayMessagesAsync(
+            IActorContext context,
+            string persistenceId,
+            long fromSequenceNumber,
+            long toSequenceNumber,
+            long max,
             Action<IPersistentRepresentation> recoveryCallback)
         {
             var highest = await HighestSequenceNumberAsync(persistenceId);
@@ -114,88 +135,55 @@ namespace Akka.Persistence.ServiceFabric.Journal
         /// <returns></returns>
         protected async override Task DeleteMessagesToAsync(string persistenceId, long toSequenceNumber)
         {
-            var highestSequenceNumber = await HighestSequenceNumberAsync(persistenceId);
+            var lowestSequenceNumber = 0L;
+            long newLowestSequenceNumber = 0L;
+            var highestSequenceNumber = await this.HighestSequenceNumberAsync(persistenceId);
             var toSeqNr = Math.Min(toSequenceNumber, highestSequenceNumber);
-            for (var snr = 1L; snr <= toSeqNr; snr++)
-            {
-                await DeleteAsync(persistenceId, snr);
-            }
 
-            return;
-        }
-
-        public async Task<Messages> AddAsync(IPersistentRepresentation persistent)
-        {
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{persistent.PersistenceId}");
-                var list = await messages.GetOrAddAsync(tx, persistent.PersistenceId, pid => new LinkedList<IPersistentRepresentation>());
-                list.AddLast(persistent);
-                await tx.CommitAsync();
-                return messages;
-            }
-        }
+                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, JournalEntry>>($"Messages_{persistenceId}");
 
-        public async Task<Messages> UpdateAsync(string pid, long sequenceNumber, Func<IPersistentRepresentation, IPersistentRepresentation> updater)
-        {
-            using (var tx = this.StateManager.CreateTransaction())
-            {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{pid}");
-                var result = await messages.TryGetValueAsync(tx, pid);
+                IReliableDictionary<string, string> messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{persistenceId}");
+
+                var result = await messageMetadata.TryGetValueAsync(tx, "LowestSequenceNumber");
 
                 if (result.HasValue)
                 {
-                    var node = result.Value.First;
-                    while (node != null)
-                    {
-                        if (node.Value.SequenceNr == sequenceNumber)
-                            node.Value = updater(node.Value);
-
-                        node = node.Next;
-                    }
+                    long.TryParse(result.Value, out lowestSequenceNumber);
+                    newLowestSequenceNumber = lowestSequenceNumber;
                 }
-
-                await tx.CommitAsync();
-                return messages;
-            }            
-        }
-
-        public async Task<Messages> DeleteAsync(string pid, long sequenceNumber)
-        {//combine with calling method to make more efficient, dont need to loop through collections continuously
-            using (var tx = this.StateManager.CreateTransaction())
-            {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{pid}");
-                var result = await messages.TryGetValueAsync(tx, pid);
-                if (result.HasValue)
+                else
                 {
-                    var node = result.Value.First;
-                    while (node != null)
-                    {
-                        if (node.Value.SequenceNr == sequenceNumber) //if Sequence number above then jump ouiof loop
-                            result.Value.Remove(node);
-
-                        node = node.Next;
-                    }
+                    await messageMetadata.TryAddAsync(tx, "LowestSequenceNumber", "0");
                 }
 
+                for (long i = lowestSequenceNumber; i < toSequenceNumber; i++)
+                {
+                    var deleted = await messages.TryRemoveAsync(tx, i.ToString());
+                    newLowestSequenceNumber = i + 1;
+                }
+
+                await messageMetadata.TryUpdateAsync(tx, "LowestSequenceNumber", newLowestSequenceNumber.ToString(), lowestSequenceNumber.ToString());
                 await tx.CommitAsync();
-                return messages;
+                return;
             }
         }
 
         public async Task<IEnumerable<IPersistentRepresentation>> ReadAsync(string pid, long fromSequenceNumber, long toSequenceNumber, long max)
         {
-            var ret = Enumerable.Empty<IPersistentRepresentation>();
+            var ret = new List<IPersistentRepresentation>();
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{pid}");
-                var result = await messages.TryGetValueAsync(tx, pid);
+                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, JournalEntry>>($"Messages_{pid}");
 
-                if (result.HasValue)
+                for (long i = fromSequenceNumber; i < toSequenceNumber; i++)
                 {
-                    ret = result.Value
-                        .Where(x => x.SequenceNr >= fromSequenceNumber && x.SequenceNr <= toSequenceNumber)
-                        .Take(max > int.MaxValue ? int.MaxValue : (int)max);
+                    var result = await messages.TryGetValueAsync(tx, i.ToString());
+                    if (result.HasValue)
+                    {
+                        ret.Add(this.ToPersistanceRepresentation(result.Value, this.Sender));
+                    }
                 }
 
                 await tx.CommitAsync();
@@ -204,25 +192,49 @@ namespace Akka.Persistence.ServiceFabric.Journal
             return ret;
         }
 
+        private Persistent ToPersistanceRepresentation(JournalEntry entry, IActorRef sender)
+        {
+            return new Persistent(entry.Payload, entry.SequenceNr, entry.Manifest, entry.PersistenceId, entry.IsDeleted, sender);
+        }
+
         public async Task<long> HighestSequenceNumberAsync(string pid)
         {
-            long returnLast = 0L;
+            long returnHighestSequenceNumberAsync = 0L;
 
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, LinkedList<IPersistentRepresentation>>>($"Messages_{pid}");
-                var result = await messages.TryGetValueAsync(tx, pid);
+                var messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{pid}");
+                var result = await messageMetadata.TryGetValueAsync(tx, "HighestSequenceNumber");
+
+                await tx.CommitAsync();
 
                 if (result.HasValue)
                 {
-                    var last = result.Value.LastOrDefault();
-                    returnLast = last != null ? last.SequenceNr : 0L;
+                    long.TryParse(result.Value, out returnHighestSequenceNumberAsync);
                 }
+            }
+
+            return returnHighestSequenceNumberAsync;
+        }
+
+        public async Task<long> LowestSequenceNumberAsync(string pid)
+        {
+            long returnLowestSequenceNumberAsync = 0L;
+
+            using (var tx = this.StateManager.CreateTransaction())
+            {
+                var messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{pid}");
+                var result = await messageMetadata.TryGetValueAsync(tx, "LowestSequenceNumber");
 
                 await tx.CommitAsync();
-                return returnLast;
+
+                if (result.HasValue)
+                {
+                    long.TryParse(result.Value, out returnLowestSequenceNumberAsync);
+                }
             }
+
+            return returnLowestSequenceNumberAsync;
         }
     }
 }
-

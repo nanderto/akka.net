@@ -55,6 +55,7 @@ namespace Akka.Persistence.ServiceFabric
         }
 
         private const int MessageEventId = 1;
+
         [Event(MessageEventId, Level = EventLevel.Informational, Message = "{0}")]
         public void Message(string message)
         {
