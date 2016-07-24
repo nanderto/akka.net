@@ -73,8 +73,13 @@ namespace AkkaPersistence
                     }  
                 }");
 
-
+            //Create a reliable conter and set it to 0
             var myDictionary = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>("myDictionary");
+            using (var tx = StateManager.CreateTransaction())
+            {
+                var ret = await myDictionary.AddOrUpdateAsync(tx, "Counter", 0, (key, value) => ++value);
+                await tx.CommitAsync();
+            }
 
             // Create a new actor system (a container for your actors)
             var system = Akka.Actor.ActorSystem.Create("MySystem", config);
@@ -91,7 +96,9 @@ namespace AkkaPersistence
 
             //AtLeastOnceDelivery(system);
 
-            await IncrementCounter(system, cancellationToken);
+            //await IncrementCounter(system, cancellationToken);
+
+            await IncrementCounter2(system, cancellationToken, this.StateManager);
         }
 
         private static async Task IncrementCounter(ActorSystem system, CancellationToken cancellationToken)
@@ -124,21 +131,79 @@ namespace AkkaPersistence
                     var currentCount = result != null && int.Parse(result.ToString()) > 0 ? result.ToString() : "Value does not exist.";
                     ServiceEventSource.Current.Message($"Current Counter Value: {currentCount}");
 
-                    var messages = (List<string>) await logger.Ask("Get Messages");
+                    var messages = (List<string>)await logger.Ask("Get Messages");
+                    WriteOutMessages(messages);
 
-                    if(messages != null)
-                    {
-                        foreach (var item in messages)
-                        {
-                            ServiceEventSource.Current.Message($"Message in saved state is: {item}");
-                        }
-                    }         
+                    messages = (List<string>)await logger.Ask(new LoggerActor.GetMessages());
+                    WriteOutMessages(messages);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
                 ++counter;
             }
         }
+
+        private static void WriteOutMessages(List<string> messages)
+        {
+            if (messages != null)
+            {
+                foreach (var item in messages)
+                {
+                    ServiceEventSource.Current.Message($"Message in saved state is: {item}");
+                }
+            }
+        }
+
+
+        private static async Task IncrementCounter2(ActorSystem system, CancellationToken cancellationToken, IReliableStateManager stateManager)
+        {
+            // Create your actor and get a reference to it.
+            // This will be an "ActorRef", which is not a
+            // reference to the actual actor instance
+            // but rather a client or proxy to it.
+            var Counter = system.ActorOf<Counter>("Startup");
+            //var logger2 = system.ActorOf<LoggerActor>("Startup2");
+            // Send a message to the actor
+            //Counter.Tell("First Message");
+            //logger2.Tell("First Message to Logger 2");
+            var counter = 0;
+
+            var myDictionary = await stateManager.GetOrAddAsync<IReliableDictionary<string, long>>("myDictionary");
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                
+
+                var result = await Counter.Ask(new Counter.GetCount());
+                var currentCount = result != null && int.Parse(result.ToString()) > 0 ? result.ToString() : "Value does not exist.";
+                ServiceEventSource.Current.Message($"Current Counter Value: {currentCount}");
+                Counter.Tell("Increment");
+
+                if (counter % 5 == 0)
+                {
+                   
+                }
+
+                
+                using (var tx = stateManager.CreateTransaction())
+                {
+                    var reliableResult = await myDictionary.TryGetValueAsync(tx, "Counter");
+                    var reliableCounter = reliableResult.HasValue ? reliableResult.Value.ToString() : "Value does not exist.";
+                    ServiceEventSource.Current.Message($"Current Reliable Counter Value: {reliableCounter}");
+                    var ret = await myDictionary.AddOrUpdateAsync(tx, "Counter", 0, (key, value) => ++value);
+                    //ServiceEventSource.Current.Message($"Ret: {ret}");
+                    await tx.CommitAsync();
+                }
+
+                ServiceEventSource.Current.Message($"Current loop Counter Value: {counter}");
+
+                ++counter;
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            }
+        }
+
         private static void AtLeastOnceDelivery(ActorSystem system)
         {
              ServiceEventSource.Current.Message("\n--- AT LEAST ONCE DELIVERY EXAMPLE ---\n");
@@ -254,6 +319,11 @@ namespace AkkaPersistence
 
             // print current actor state
             aref.Tell("print");
+
+            for (int i = 0; i < 10; i++)
+            {
+                Task.Delay(1000);
+            }
 
             aref.GracefulStop(TimeSpan.FromSeconds(10));
             // on first run displayed state should be: 

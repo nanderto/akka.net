@@ -90,6 +90,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Actors\AtLeastOnceDeliveryExampleActor.cs" />
+    <Compile Include="Actors\Counter.cs" />
     <Compile Include="Actors\ExamplePersistentActor.cs" />
     <Compile Include="Actors\ExamplePersistentFailingActor.cs" />
     <Compile Include="Actors\LoggerActor.cs" />

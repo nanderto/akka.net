@@ -37,7 +37,7 @@
         public StatefulServiceContext StatefulServiceContext { get; set; }
 
         /// <summary>
-        /// The settings for the Service Fabric Snapshot Store.
+        /// Gets the settings for the Service Fabric Snapshot Store.
         /// </summary>
         public ServiceFabricSnapshotSettings SnapshotStoreSettings { get; private set; }
 

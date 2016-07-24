@@ -71,26 +71,28 @@
             ServiceEventSource.Current.Message($"Entering ServiceFabricSnapshotStore.{nameof(this.LoadAsync)} PersistenceId: {persistenceId} ");
 
             SnapshotEntry snapshot = null;
-            if (criteria.MaxSequenceNr > 0 && criteria.MaxSequenceNr < long.MaxValue)
+
+            //var maxNumberkey = $"{persistenceId}_{criteria.MaxSequenceNr}";
+            using (var tx = this.stateManager.CreateTransaction())
             {
-                var maxNumberkey = $"{persistenceId}_{criteria.MaxSequenceNr}";
-                using (var tx = this.stateManager.CreateTransaction())
+                ServiceEventSource.Current.Message($"{persistenceId} ");
+
+                var snapshotStorageCurrentHighSequenceNumber = await this.stateManager.GetOrAddAsync<IReliableDictionary<string, long>>("SnapshotStorageCurrentHighSequenceNumber");
+
+                var maxSequenceNumberConditional = await snapshotStorageCurrentHighSequenceNumber.TryGetValueAsync(tx, persistenceId);
+                if(maxSequenceNumberConditional.HasValue)
                 {
-                    ServiceEventSource.Current.Message($"{persistenceId} ");
-
+                    var maxSequenceNumber = maxSequenceNumberConditional.Value;
                     var snapshots = await this.stateManager.GetOrAddAsync<IReliableDictionary<string, SnapshotEntry>>(persistenceId);
-                    var snapshotStorageCurrentHighSequenceNumber = await this.stateManager.GetOrAddAsync<IReliableDictionary<string, long>>("SnapshotStorageCurrentHighSequenceNumber");
-
-                    var maxSequenceNumberConditional = await snapshotStorageCurrentHighSequenceNumber.TryGetValueAsync(tx, persistenceId);
-                    if(maxSequenceNumberConditional.HasValue)
-                    {
-                        var maxSequenceNumber = maxSequenceNumberConditional.Value;
-                        var ret = await snapshots.TryGetValueAsync(tx, $"{persistenceId}_{maxSequenceNumber}");
-                        snapshot = ret.HasValue ? ret.Value : null;
-                        await tx.CommitAsync();
-                        SelectedSnapshot ss = new SelectedSnapshot(new SnapshotMetadata(persistenceId, snapshot.SequenceNr), snapshot);
-                        return ss;
-                    }
+                    var ret = await snapshots.TryGetValueAsync(tx, $"{persistenceId}_{maxSequenceNumber}");
+                    snapshot = ret.HasValue ? ret.Value : null;
+                    await tx.CommitAsync();
+                    SelectedSnapshot selectedSnapshot = new SelectedSnapshot(new SnapshotMetadata(persistenceId, snapshot.SequenceNr), snapshot);
+                    return selectedSnapshot;
+                }
+                else
+                {
+                    await snapshotStorageCurrentHighSequenceNumber.AddAsync(tx, persistenceId, 0);
                 }
             }
 

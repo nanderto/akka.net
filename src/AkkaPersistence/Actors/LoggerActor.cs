@@ -27,9 +27,9 @@ namespace AkkaPersistence.Actors
             });
 
             Recover<SnapshotOffer>(offer => {
-                var messages = offer.Snapshot as List<string>;
-                if (messages != null) // null check
-                    messages = (List<string>) messages.Concat(messages);
+                var snapshotMessages = offer.Snapshot as List<string>;
+                if (snapshotMessages != null) // null check
+                    messages = (List<string>)snapshotMessages.Concat(messages);
             });
 
             Command<string>(str => Persist(str, s => 
@@ -84,8 +84,8 @@ namespace AkkaPersistence.Actors
                 ServiceEventSource.Current.Message($"Snapshot failure");
             });
 
-            IReadOnlyList<string> readOnlyList = new List<string>(messages);
-            Command<GetMessages>(get => Sender.Tell(readOnlyList));
+           // IReadOnlyList<string> readOnlyList = new List<string>(messages);
+            Command<GetMessages>(get => Sender.Tell(new List<string>(messages)));
 
 
             //Receive<string>(str => messages.Add(str));
