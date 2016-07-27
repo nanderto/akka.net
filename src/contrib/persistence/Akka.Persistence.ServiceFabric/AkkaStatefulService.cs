@@ -5,6 +5,7 @@
     using Akka.Persistence.ServiceFabric.Snapshot;
     using Microsoft.ServiceFabric.Data;
     using Microsoft.ServiceFabric.Services.Runtime;
+    using Journal;
 
     public class AkkaStatefulService : StatefulService
     {
@@ -33,6 +34,7 @@
         public Task OnInitialize()
         {
             this.StateManager.TryAddStateSerializer(new SnapshotEntrySerializer());
+            this.StateManager.TryAddStateSerializer(new JournalEntrySerializer());
             return Task.FromResult(true);
         }
 

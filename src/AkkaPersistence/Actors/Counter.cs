@@ -27,26 +27,37 @@ namespace AkkaPersistence.Actors
                 State.Update(evt);
             });
 
+            Recover<string>(s =>
+            {
+                State.Update(new Evt(s));
+            });
+
             Recover<SnapshotOffer>(offer => {
-                var snapshotEntry = offer.Snapshot as SnapshotEntry;
-                if (snapshotEntry != null)
+                var counterState =  offer.Snapshot as CounterState;
+                if (counterState != null)
                 {
-                    State = (CounterState)snapshotEntry.Snapshot;
+                    State = counterState;
                 }
             });
 
-            Command<string>(str => Persist(str, s =>
+            Command<string>(s =>
             {
-                ++counter;
                 var evt = new Evt(s);
-                State.Update(evt);
 
-                if (++_msgsSinceLastSnapshot % 10 == 0)
+                Persist<Evt>(evt, evnt =>
                 {
-                    //time to save a snapshot
-                    SaveSnapshot(State.Copy());
-                }
-            }));
+                    ++counter;
+
+                    //var evt = new Evt(str);
+                    State.Update(evnt);
+
+                    if (++_msgsSinceLastSnapshot % 10 == 0)
+                    {
+                        //time to save a snapshot
+                        SaveSnapshot(State.Copy());
+                    }
+                });
+            });
 
             Command<GetCount>(get => Sender.Tell(State.Count));
 

@@ -72,7 +72,6 @@
 
             SnapshotEntry snapshot = null;
 
-            //var maxNumberkey = $"{persistenceId}_{criteria.MaxSequenceNr}";
             using (var tx = this.stateManager.CreateTransaction())
             {
                 ServiceEventSource.Current.Message($"{persistenceId} ");
@@ -87,7 +86,7 @@
                     var ret = await snapshots.TryGetValueAsync(tx, $"{persistenceId}_{maxSequenceNumber}");
                     snapshot = ret.HasValue ? ret.Value : null;
                     await tx.CommitAsync();
-                    SelectedSnapshot selectedSnapshot = new SelectedSnapshot(new SnapshotMetadata(persistenceId, snapshot.SequenceNr), snapshot);
+                    SelectedSnapshot selectedSnapshot = new SelectedSnapshot(new SnapshotMetadata(persistenceId, snapshot.SequenceNr), snapshot.Snapshot);
                     return selectedSnapshot;
                 }
                 else

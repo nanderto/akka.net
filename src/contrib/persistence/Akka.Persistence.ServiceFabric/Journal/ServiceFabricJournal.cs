@@ -34,8 +34,8 @@
         /// <returns></returns>
         protected async override Task<IImmutableList<Exception>> WriteMessagesAsync(IEnumerable<AtomicWrite> messages)
         {
-            IReliableDictionary<string, JournalEntry> messageList = null;
-            IReliableDictionary<string, string> messageMetadata = null;
+            IReliableDictionary<long, JournalEntry> messageList = null;
+            IReliableDictionary<string, long> messageMetadata = null;
             long highestSequenceNumber = 0L;
             long newHighestSequenceNumber = 0L;
 
@@ -47,22 +47,21 @@
                     {
                         if (messageList == null)
                         {
-                            messageList = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, JournalEntry>>($"Messages_{payload.PersistenceId}");
+                            messageList = await this.StateManager.GetOrAddAsync<IReliableDictionary<long, JournalEntry>>($"Messages_{payload.PersistenceId}");
                         }
 
                         if (messageMetadata == null)
                         {
-                            messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{payload.PersistenceId}");
+                            messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>($"MessageMetaData_{payload.PersistenceId}");
                             var result = await messageMetadata.TryGetValueAsync(tx, "HighestSequenceNumber");
 
                             if (result.HasValue)
                             {
-                                long.TryParse(result.Value, out highestSequenceNumber);
-                                newHighestSequenceNumber = highestSequenceNumber;
+                                newHighestSequenceNumber = result.Value;
                             }
                             else
                             {
-                                var ret = await messageMetadata.TryAddAsync(tx, "HighestSequenceNumber", "0");
+                                var ret = await messageMetadata.TryAddAsync(tx, "HighestSequenceNumber", 0);
                             }
                         }
 
@@ -73,11 +72,12 @@
 
                         var journalEntry = ToJournalEntry(payload);
 
-                        var list = await messageList.TryAddAsync(tx, journalEntry.SequenceNr.ToString(), journalEntry);
+
+                        var list = await messageList.TryAddAsync(tx, journalEntry.SequenceNr, journalEntry);
                     }
                 }
 
-                await messageMetadata.TryUpdateAsync(tx, "HighestSequenceNumber", newHighestSequenceNumber.ToString(), highestSequenceNumber.ToString());
+                await messageMetadata.TryUpdateAsync(tx, "HighestSequenceNumber", newHighestSequenceNumber, highestSequenceNumber);
 
                 await tx.CommitAsync();
             }
@@ -142,29 +142,28 @@
 
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, JournalEntry>>($"Messages_{persistenceId}");
+                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<long, JournalEntry>>($"Messages_{persistenceId}");
 
-                IReliableDictionary<string, string> messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{persistenceId}");
+                IReliableDictionary<string, long> messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>($"MessageMetaData_{persistenceId}");
 
                 var result = await messageMetadata.TryGetValueAsync(tx, "LowestSequenceNumber");
 
                 if (result.HasValue)
                 {
-                    long.TryParse(result.Value, out lowestSequenceNumber);
-                    newLowestSequenceNumber = lowestSequenceNumber;
+                    newLowestSequenceNumber = result.Value;
                 }
                 else
                 {
-                    await messageMetadata.TryAddAsync(tx, "LowestSequenceNumber", "0");
+                    await messageMetadata.TryAddAsync(tx, "LowestSequenceNumber", 0);
                 }
 
                 for (long i = lowestSequenceNumber; i < toSequenceNumber; i++)
                 {
-                    var deleted = await messages.TryRemoveAsync(tx, i.ToString());
+                    var deleted = await messages.TryRemoveAsync(tx, i);
                     newLowestSequenceNumber = i + 1;
                 }
 
-                await messageMetadata.TryUpdateAsync(tx, "LowestSequenceNumber", newLowestSequenceNumber.ToString(), lowestSequenceNumber.ToString());
+                await messageMetadata.TryUpdateAsync(tx, "LowestSequenceNumber", newLowestSequenceNumber, lowestSequenceNumber);
                 await tx.CommitAsync();
                 return;
             }
@@ -175,11 +174,11 @@
             var ret = new List<IPersistentRepresentation>();
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, JournalEntry>>($"Messages_{pid}");
+                var messages = await this.StateManager.GetOrAddAsync<IReliableDictionary<long, JournalEntry>>($"Messages_{pid}");
 
                 for (long i = fromSequenceNumber; i < toSequenceNumber; i++)
                 {
-                    var result = await messages.TryGetValueAsync(tx, i.ToString());
+                    var result = await messages.TryGetValueAsync(tx, i);
                     if (result.HasValue)
                     {
                         ret.Add(this.ToPersistanceRepresentation(result.Value, this.Sender));
@@ -203,14 +202,14 @@
 
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{pid}");
+                var messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>($"MessageMetaData_{pid}");
                 var result = await messageMetadata.TryGetValueAsync(tx, "HighestSequenceNumber");
 
                 await tx.CommitAsync();
 
                 if (result.HasValue)
                 {
-                    long.TryParse(result.Value, out returnHighestSequenceNumberAsync);
+                    returnHighestSequenceNumberAsync = result.Value;
                 }
             }
 
@@ -223,14 +222,14 @@
 
             using (var tx = this.StateManager.CreateTransaction())
             {
-                var messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, string>>($"MessageMetaData_{pid}");
+                var messageMetadata = await this.StateManager.GetOrAddAsync<IReliableDictionary<string, long>>($"MessageMetaData_{pid}");
                 var result = await messageMetadata.TryGetValueAsync(tx, "LowestSequenceNumber");
 
                 await tx.CommitAsync();
 
                 if (result.HasValue)
                 {
-                    long.TryParse(result.Value, out returnLowestSequenceNumberAsync);
+                    returnLowestSequenceNumberAsync = result.Value;
                 }
             }
 
