@@ -1,6 +1,7 @@
 This implementation of Service Fabric persistence embeds the Service Fabric reliable collections in the actor (AsyncWriteJounrnal) responsible for persistence.
 
 How to use:
+
 1) reference the Akka.Persistence.ServiceFabric project / nuget (not yet available)
 
 2) Create a stateful service in the standard service fabric way.
