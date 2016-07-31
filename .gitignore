@@ -227,3 +227,4 @@ target/
 
 # API Approval received files
 **/Akka.API.Tests/*.received.txt
+/src/contrib/persistence/Akka.Persistence.ServiceFabric/Akka.Persistence.ServiceFabric.sln
