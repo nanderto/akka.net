@@ -92,6 +92,7 @@
                 else
                 {
                     await snapshotStorageCurrentHighSequenceNumber.AddAsync(tx, persistenceId, 0);
+                    await tx.CommitAsync();
                 }
             }
 
